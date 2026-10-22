@@ -37,7 +37,7 @@ r.get('/', h(async (req, res) => {
   if (!isStaffRole(req.user) || req.query.mine === 'true') filter.assignee = req.user._id;
   if (req.query.job) filter.job = req.query.job;
   if (req.query.status) filter.status = { $in: String(req.query.status).split(',') };
-  res.json(await populate(Task.find(filter)).sort({ createdAt: 1 }).limit(300));
+  res.json(await populate(Task.find(filter)).sort({ createdAt: 1 }).limit(1000));
 }));
 
 r.post('/', requireRole('supervisor', 'admin'), h(async (req, res) => {
