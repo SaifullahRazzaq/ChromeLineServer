@@ -33,8 +33,9 @@ const schema = new Schema(
 
 schema.methods.actualMinutes = function () {
   const now = Date.now();
+  // timeEntries is absent when the task was loaded with a partial projection (e.g. populated as a dependency)
   return Math.round(
-    this.timeEntries.reduce((s, e) => s + ((e.end ? e.end.getTime() : now) - e.start.getTime()) / 60000, 0)
+    (this.timeEntries || []).reduce((s, e) => s + ((e.end ? e.end.getTime() : now) - e.start.getTime()) / 60000, 0)
   );
 };
 

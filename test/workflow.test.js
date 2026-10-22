@@ -171,3 +171,12 @@ test('public tracking needs matching order number and plate, and leaks nothing i
   assert.equal(ok.data.stages.find((s) => s.state === 'current').id, 'repair');
   assert.ok(!('customer' in ok.data) && !('internalNotes' in ok.data) && !('estimate' in ok.data));
 });
+
+test('task list loads when tasks have populated dependencies', async () => {
+  const r = await api('GET', '/tasks', { token: tok.sup });
+  assert.equal(r.status, 200);
+  const withDeps = r.data.filter((t) => t.dependencies.length);
+  assert.ok(withDeps.length >= 1, 'seed has dependent tasks');
+  assert.ok(r.data.every((t) => typeof t.actualMins === 'number'));
+  assert.equal((await api('GET', '/tasks?status=todo,in_progress,paused,rework', { token: tok.tech })).status, 200);
+});
