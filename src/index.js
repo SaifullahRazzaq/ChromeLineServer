@@ -1,5 +1,10 @@
-// Entry for both modes. Nothing is imported statically so a startup failure on a
+// Entry for both modes. The app itself is loaded lazily so a startup failure on a
 // serverless host is reported in the response instead of an opaque platform 500.
+// Vercel's Express detection scans the entry file for an express import, so keep this one.
+import express from 'express';
+
+export const framework = express.name;
+
 let boot;
 
 function load() {
