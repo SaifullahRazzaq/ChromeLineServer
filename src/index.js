@@ -1,10 +1,9 @@
-// Entry for both modes. The app itself is loaded lazily so a startup failure on a
-// serverless host is reported in the response instead of an opaque platform 500.
-// Vercel's Express detection scans the entry file for an express import, so keep this one.
+// Entry for both modes (Vercel serverless and a long-running server).
+// This file is a standard Express app: `export default app`. The real app (routes, middleware)
+// is loaded lazily inside it so a startup failure is reported as JSON instead of an opaque 500.
 import express from 'express';
 
-export const framework = express.name;
-
+const app = express();
 let boot;
 
 function load() {
@@ -22,7 +21,7 @@ function load() {
       });
       return connecting;
     };
-    return { app: createApp(), connect };
+    return { inner: createApp(), connect };
   })().catch((e) => {
     boot = undefined;
     throw e;
@@ -30,37 +29,32 @@ function load() {
   return boot;
 }
 
-const send = (res, status, body) => {
-  res.statusCode = status;
-  res.setHeader('content-type', 'application/json');
-  res.end(JSON.stringify(body));
-};
-
-// Serverless entry (Vercel). Socket.IO cannot run in this mode; use a long-running host for realtime.
-export default async function handler(req, res) {
-  let b;
+app.use(async (req, res, next) => {
   try {
-    b = await load();
+    const b = await load();
+    if (process.env.VERCEL && (!process.env.MONGO_URI || !process.env.JWT_SECRET)) {
+      return res.status(500).json({ error: 'Server is missing MONGO_URI or JWT_SECRET environment variables' });
+    }
+    try {
+      await b.connect();
+    } catch (e) {
+      console.error('Mongo connect failed:', e.message);
+      return res.status(503).json({ error: 'Database unavailable', detail: String(e.message).slice(0, 200) });
+    }
+    req.app.locals.inner = b.inner;
+    next();
   } catch (e) {
     console.error('Startup failed:', e);
-    return send(res, 500, { error: 'Server failed to start', detail: String(e?.message || e).slice(0, 300) });
+    res.status(500).json({ error: 'Server failed to start', detail: String(e?.message || e).slice(0, 300) });
   }
-  if (!process.env.MONGO_URI || !process.env.JWT_SECRET) {
-    return send(res, 500, { error: 'Server is missing MONGO_URI or JWT_SECRET environment variables' });
-  }
-  try {
-    await b.connect();
-  } catch (e) {
-    console.error('Mongo connect failed:', e.message);
-    return send(res, 503, { error: 'Database unavailable', detail: String(e.message).slice(0, 200) });
-  }
-  return b.app(req, res);
-}
+});
 
-// Long-running mode (local dev, Render, Railway)
+app.use((req, res, next) => req.app.locals.inner(req, res, next));
+
+// Long-running mode (local dev, Render, Railway). Socket.IO only works here.
 async function start() {
   const { default: http } = await import('node:http');
-  const { app, connect } = await load();
+  const { connect } = await load();
   const { initRealtime } = await import('./services/realtime.js');
   const { sweepDeadlines } = await import('./services/deadlines.js');
   const PORT = process.env.PORT || 5001;
@@ -77,3 +71,5 @@ async function start() {
 }
 
 if (!process.env.VERCEL) start().catch((e) => { console.error(e); process.exit(1); });
+
+export default app;
