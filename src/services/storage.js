@@ -1,9 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import os from 'node:os';
 import multer from 'multer';
 
-export const UPLOAD_DIR = path.resolve(process.cwd(), 'uploads');
+// Serverless filesystems are read-only except /tmp (uploads there are not persistent: use CLOUDINARY_URL)
+export const UPLOAD_DIR = process.env.VERCEL ? path.join(os.tmpdir(), 'uploads') : path.resolve(process.cwd(), 'uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 const ALLOWED = /^(image\/(png|jpe?g|webp|gif|heic)|application\/pdf)$/;
