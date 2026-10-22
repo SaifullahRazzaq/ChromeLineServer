@@ -6,7 +6,7 @@ function load() {
   boot ||= (async () => {
     await import('dotenv/config');
     const { default: mongoose } = await import('mongoose');
-    const { createApp } = await import('./app.js');
+    const { createApp } = await import('./createApp.js');
     const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/primebody';
     let connecting;
     const connect = () => {

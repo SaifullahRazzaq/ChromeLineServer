@@ -31,7 +31,7 @@ const photo = (kind) => {
 
 before(async () => {
   execFileSync('node', ['src/seed.js'], { env: { ...process.env }, stdio: 'ignore' });
-  const { createApp } = await import('../src/app.js');
+  const { createApp } = await import('../src/createApp.js');
   await mongoose.connect(process.env.MONGO_URI);
   server = http.createServer(createApp());
   await new Promise((r) => server.listen(0, r));
