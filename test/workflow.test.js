@@ -180,3 +180,45 @@ test('task list loads when tasks have populated dependencies', async () => {
   assert.ok(r.data.every((t) => typeof t.actualMins === 'number'));
   assert.equal((await api('GET', '/tasks?status=todo,in_progress,paused,rework', { token: tok.tech })).status, 200);
 });
+
+test('technician management: supervisor can add technicians, not staff; duplicates rejected', async () => {
+  const body = { name: 'New Tech', email: 'new.tech@chromeline.test', password: 'Sup3rSecret!', phone: '0300 5555555', specialty: 'Painter', skills: 'Painting, Polishing', emergencyContact: { name: 'Mum', phone: '0300 1' } };
+  assert.equal((await api('POST', '/admin/users', { token: tok.tech, body })).status, 403);
+  const ok = await api('POST', '/admin/users', { token: tok.sup, body: { ...body, role: 'admin' } });
+  assert.equal(ok.status, 201);
+  assert.equal(ok.data.role, 'technician', 'supervisor cannot create staff roles');
+  assert.match(ok.data.employeeId, /^TECH-\d{3}$/);
+  assert.deepEqual(ok.data.skills, ['Painting', 'Polishing']);
+  assert.equal((await api('POST', '/admin/users', { token: tok.sup, body })).status, 409);
+  assert.equal((await api('POST', '/admin/users', { token: tok.sup, body: { ...body, email: 'x@y.com', password: 'short' } })).status, 400);
+  const login = await api('POST', '/auth/login', { body: { email: body.email, password: body.password } });
+  assert.equal(login.status, 200);
+  // supervisor can edit/deactivate a technician but not an admin
+  assert.equal((await api('PATCH', `/admin/users/${ok.data._id}`, { token: tok.sup, body: { active: false } })).data.active, false);
+  assert.equal((await api('POST', '/auth/login', { body: { email: body.email, password: body.password } })).status, 401);
+  const admins = (await api('GET', '/admin/users?role=admin', { token: tok.admin })).data;
+  assert.equal((await api('PATCH', `/admin/users/${admins[0]._id}`, { token: tok.sup, body: { name: 'Hacked' } })).status, 403);
+});
+
+test('inventory: add part, receive/issue stock with log, low-stock flag, access control', async () => {
+  const body = { sku: 'tst-1', name: 'Test bracket', category: 'hardware', stock: 5, reorderLevel: 3, unitCost: 12, supplier: 'ACME', location: 'Z9' };
+  assert.equal((await api('POST', '/parts', { token: tok.tech, body })).status, 403);
+  const created = await api('POST', '/parts', { token: tok.sup, body });
+  assert.equal(created.status, 201);
+  assert.equal(created.data.sku, 'TST-1');
+  assert.equal((await api('POST', '/parts', { token: tok.sup, body })).status, 400, 'duplicate sku');
+  const id = created.data._id;
+  assert.equal(created.data.lowStock, false);
+  assert.equal((await api('POST', `/parts/${id}/adjust`, { token: tok.sup, body: { type: 'issue', qty: 3 } })).data.lowStock, true);
+  assert.equal((await api('POST', `/parts/${id}/adjust`, { token: tok.sup, body: { type: 'issue', qty: 99 } })).status, 400);
+  assert.equal((await api('POST', `/parts/${id}/adjust`, { token: tok.sup, body: { type: 'receive', qty: 10, note: 'PO-1' } })).data.stock, 12);
+  assert.equal((await api('POST', `/parts/${id}/adjust`, { token: tok.tech, body: { type: 'receive', qty: 1 } })).status, 403);
+  const log = (await api('GET', `/parts/${id}/movements`, { token: tok.sup })).data;
+  assert.deepEqual(log.map((m) => m.type).reverse(), ['initial', 'issue', 'receive']);
+  assert.equal(log[0].balanceAfter, 12);
+  assert.equal((await api('PATCH', `/parts/${id}`, { token: tok.sup, body: { active: false } })).data.active, false);
+  assert.ok(!(await api('GET', '/parts', { token: tok.tech })).data.some((p) => p._id === id), 'archived parts hidden from technicians');
+  const sum = await api('GET', '/parts/inventory/summary', { token: tok.sup });
+  assert.equal(sum.status, 200);
+  assert.ok(sum.data.items >= 6);
+});

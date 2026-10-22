@@ -6,39 +6,78 @@ import Task from '../models/Task.js';
 import { Attendance } from '../models/Attendance.js';
 import { Setting } from '../models/Comms.js';
 import { auth, requireRole, requireCan } from '../middleware/auth.js';
-import { h, bad, notFound, forbidden } from '../utils/http.js';
+import { h, bad, notFound, forbidden, HttpError } from '../utils/http.js';
 import { can } from '../utils/permissions.js';
 import { getSettings, DEFAULT_SETTINGS, workedMinutes } from '../services/shift.js';
 
 const r = Router();
 r.use(auth);
 
-// Technician directory: supervisors get a read/limited view, admins manage
+// Technician management. Admins manage everyone; supervisors manage technician accounts only (the "limited" row
+// of the permission matrix); a technician explicitly granted manageTechnicians gets the same limited access.
+const canManageUsers = (req, _res, next) =>
+  req.user.role === 'admin' || req.user.role === 'supervisor' || can.manageTechnicians(req.user) ? next() : next(forbidden('Not allowed to manage users'));
+
+const PROFILE = ['name', 'specialty', 'phone', 'address', 'joinedAt', 'skills', 'emergencyContact'];
+
+async function nextEmployeeId() {
+  const last = await User.find({ employeeId: /^TECH-\d+$/ }).select('employeeId').lean();
+  const max = last.reduce((m, u) => Math.max(m, Number(u.employeeId.slice(5))), 0);
+  return `TECH-${String(max + 1).padStart(3, '0')}`;
+}
+
+const cleanSkills = (v) => (Array.isArray(v) ? v : String(v || '').split(',')).map((x) => String(x).trim()).filter(Boolean).slice(0, 20);
+
 r.get('/users', requireRole('supervisor', 'admin'), h(async (req, res) => {
   const filter = req.query.role ? { role: req.query.role } : {};
-  if (req.user.role === 'supervisor') filter.role = 'technician'; // limited management
+  if (req.user.role === 'supervisor') filter.role = 'technician';
+  if (req.query.active === 'true') filter.active = true;
   res.json(await User.find(filter).sort({ name: 1 }));
 }));
 
-r.post('/users', requireCan('manageTechnicians'), h(async (req, res) => {
+r.post('/users', canManageUsers, h(async (req, res) => {
   const b = req.body;
-  if (!b.name || !b.email || !b.password || b.password.length < 8) throw bad('Name, email and a password of 8+ characters are required');
-  if (b.role && b.role !== 'technician' && req.user.role !== 'admin') throw forbidden('Only admins can create staff accounts');
+  const email = String(b.email || '').trim().toLowerCase();
+  if (!b.name?.trim()) throw bad('Name is required');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw bad('A valid email is required');
+  if (!b.password || b.password.length < 8) throw bad('Password must be at least 8 characters');
+  const isAdmin = req.user.role === 'admin';
+  const role = isAdmin ? b.role || 'technician' : 'technician';
+  if (!['technician', 'supervisor', 'admin'].includes(role)) throw bad('Invalid role');
+  if (await User.exists({ email })) throw new HttpError(409, 'A user with this email already exists');
+  const employeeId = b.employeeId?.trim() || (role === 'technician' ? await nextEmployeeId() : undefined);
+  if (employeeId && (await User.exists({ employeeId }))) throw new HttpError(409, 'Employee ID already in use');
   const user = await User.create({
-    name: b.name, email: b.email, role: req.user.role === 'admin' ? b.role || 'technician' : 'technician',
-    specialty: b.specialty, phone: b.phone, passwordHash: await bcrypt.hash(b.password, 10),
-    permissions: req.user.role === 'admin' ? b.permissions : undefined,
+    name: b.name.trim(), email, role, employeeId,
+    specialty: b.specialty, phone: b.phone, address: b.address, joinedAt: b.joinedAt || new Date(),
+    skills: cleanSkills(b.skills), emergencyContact: b.emergencyContact,
+    passwordHash: await bcrypt.hash(b.password, 10),
+    permissions: isAdmin && b.permissions ? b.permissions : undefined,
   });
   res.status(201).json(user);
 }));
 
-r.patch('/users/:id', requireCan('manageTechnicians'), h(async (req, res) => {
+r.patch('/users/:id', canManageUsers, h(async (req, res) => {
   const user = await User.findById(req.params.id);
   if (!user) throw notFound('User');
   const isAdmin = req.user.role === 'admin';
-  if (!isAdmin && user.role !== 'technician') throw forbidden();
-  ['name', 'specialty', 'phone', 'active'].forEach((k) => req.body[k] !== undefined && user.set(k, req.body[k]));
+  if (!isAdmin && user.role !== 'technician') throw forbidden('Only admins can edit staff accounts');
+  PROFILE.forEach((k) => req.body[k] !== undefined && user.set(k, k === 'skills' ? cleanSkills(req.body[k]) : req.body[k]));
+  if (req.body.active !== undefined) {
+    if (String(user._id) === String(req.user._id) && req.body.active === false) throw bad('You cannot deactivate yourself');
+    user.active = !!req.body.active;
+  }
+  if (req.body.email && req.body.email.toLowerCase() !== user.email) {
+    if (!isAdmin) throw forbidden('Only admins can change an email address');
+    if (await User.exists({ email: req.body.email.toLowerCase(), _id: { $ne: user._id } })) throw new HttpError(409, 'A user with this email already exists');
+    user.email = req.body.email.toLowerCase();
+  }
+  if (req.body.employeeId !== undefined && req.body.employeeId !== user.employeeId) {
+    if (req.body.employeeId && (await User.exists({ employeeId: req.body.employeeId, _id: { $ne: user._id } }))) throw new HttpError(409, 'Employee ID already in use');
+    user.employeeId = req.body.employeeId || undefined;
+  }
   if (isAdmin) {
+    if (req.body.role && String(user._id) === String(req.user._id) && req.body.role !== user.role) throw bad('You cannot change your own role');
     if (req.body.role) user.role = req.body.role;
     if (req.body.permissions) {
       for (const k of ['approveQC', 'viewFinancials', 'manageTechnicians']) {
@@ -50,7 +89,6 @@ r.patch('/users/:id', requireCan('manageTechnicians'), h(async (req, res) => {
     if (req.body.password.length < 8) throw bad('Password must be 8+ characters');
     user.passwordHash = await bcrypt.hash(req.body.password, 10);
   }
-  if (String(user._id) === String(req.user._id) && req.body.active === false) throw bad('You cannot deactivate yourself');
   await user.save();
   res.json(user);
 }));

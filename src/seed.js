@@ -4,29 +4,29 @@ import bcrypt from 'bcryptjs';
 import User from './models/User.js';
 import Job from './models/Job.js';
 import Task from './models/Task.js';
-import { Part, PartRequest } from './models/Part.js';
+import { Part, PartRequest, StockMovement } from './models/Part.js';
 import { Notification, Message } from './models/Comms.js';
 import { Attendance, LeaveRequest } from './models/Attendance.js';
 import { INSPECTION_CHECKLIST, workflowFor, FINAL_CHECKLIST, QC_SELF_CHECKLIST } from './services/checklists.js';
 
 await mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/primebody');
-await Promise.all([User, Job, Task, Part, PartRequest, Notification, Message, Attendance, LeaveRequest].map((m) => m.deleteMany({})));
+await Promise.all([User, Job, Task, Part, PartRequest, StockMovement, Notification, Message, Attendance, LeaveRequest].map((m) => m.deleteMany({})));
 
 const pw = await bcrypt.hash('Password123!', 10);
 const [admin, sup, ali, sara] = await User.create([
   { name: 'Ayesha Admin', email: 'admin@chromeline.test', role: 'admin', passwordHash: pw },
   { name: 'Sam Supervisor', email: 'supervisor@chromeline.test', role: 'supervisor', passwordHash: pw },
-  { name: 'Ali Technician', email: 'tech@chromeline.test', role: 'technician', specialty: 'Body & paint', passwordHash: pw },
-  { name: 'Sara Technician', email: 'sara@chromeline.test', role: 'technician', specialty: 'Mechanical', passwordHash: pw },
+  { name: 'Ali Technician', email: 'tech@chromeline.test', role: 'technician', specialty: 'Body & paint', employeeId: 'TECH-001', phone: '0300-1000001', skills: ['Dent removal', 'Painting'], joinedAt: new Date('2023-03-01'), passwordHash: pw },
+  { name: 'Sara Technician', email: 'sara@chromeline.test', role: 'technician', specialty: 'Mechanical', employeeId: 'TECH-002', phone: '0300-1000002', skills: ['Engine', 'Suspension'], joinedAt: new Date('2024-01-15'), passwordHash: pw },
 ]);
 
 const parts = await Part.create([
-  { sku: 'BMP-CIV-F', name: 'Front bumper cover — Civic', category: 'body', stock: 3, location: 'A1', unitCost: 180 },
-  { sku: 'HDL-CAM-L', name: 'Headlight LH — Camry', category: 'lighting', stock: 0, location: 'B2', unitCost: 240 },
-  { sku: 'CLR-2K', name: '2K clear coat 5L', category: 'paint', stock: 12, location: 'P1', unitCost: 95 },
-  { sku: 'FLR-1KG', name: 'Body filler 1kg', category: 'consumable', stock: 40, location: 'C3', unitCost: 14 },
-  { sku: 'CLP-KIT', name: 'Trim clip kit', category: 'hardware', stock: 25, location: 'C1', unitCost: 22 },
-  { sku: 'DOOR-COR-R', name: 'Rear door shell — Corolla', category: 'body', stock: 1, location: 'A3', unitCost: 410 },
+  { sku: 'BMP-CIV-F', name: 'Front bumper cover — Civic', category: 'body', stock: 3, location: 'A1', unitCost: 180, reorderLevel: 2, supplier: 'AutoParts Co' },
+  { sku: 'HDL-CAM-L', name: 'Headlight LH — Camry', category: 'lighting', stock: 0, location: 'B2', unitCost: 240, reorderLevel: 1, supplier: 'LightHouse Spares' },
+  { sku: 'CLR-2K', name: '2K clear coat 5L', category: 'paint', stock: 12, location: 'P1', unitCost: 95, reorderLevel: 4, supplier: 'ColourPro' },
+  { sku: 'FLR-1KG', name: 'Body filler 1kg', category: 'consumable', stock: 40, location: 'C3', unitCost: 14, reorderLevel: 10, supplier: 'ColourPro' },
+  { sku: 'CLP-KIT', name: 'Trim clip kit', category: 'hardware', stock: 25, location: 'C1', unitCost: 22, reorderLevel: 8, supplier: 'AutoParts Co' },
+  { sku: 'DOOR-COR-R', name: 'Rear door shell — Corolla', category: 'body', stock: 1, location: 'A3', unitCost: 410, reorderLevel: 1, supplier: 'AutoParts Co' },
 ]);
 
 const hrs = (h) => new Date(Date.now() + h * 36e5);

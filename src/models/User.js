@@ -14,6 +14,11 @@ const schema = new mongoose.Schema(
     },
     specialty: { type: String, default: '' },
     phone: { type: String, default: '' },
+    employeeId: { type: String, trim: true, unique: true, sparse: true },
+    joinedAt: { type: Date },
+    skills: [{ type: String, trim: true }],
+    address: { type: String, default: '' },
+    emergencyContact: { name: { type: String, default: '' }, phone: { type: String, default: '' } },
     active: { type: Boolean, default: true },
   },
   { timestamps: true }
