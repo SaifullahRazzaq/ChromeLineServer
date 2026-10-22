@@ -2,7 +2,7 @@ import { Attendance } from '../models/Attendance.js';
 import { Setting } from '../models/Comms.js';
 import { HttpError, dayKey } from '../utils/http.js';
 
-export const DEFAULT_SETTINGS = { shiftMinutes: 480, maxBreakMinutes: 60, workshopName: 'Chromeline Workshop', autoClockOutHours: 14 };
+export const DEFAULT_SETTINGS = { shiftMinutes: 480, maxBreakMinutes: 60, workshopName: 'PrimeBody Workshop', autoClockOutHours: 14 };
 
 export async function getSettings() {
   const rows = await Setting.find();

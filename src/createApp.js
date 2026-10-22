@@ -25,7 +25,7 @@ export function createApp() {
   app.use(express.json({ limit: '1mb' }));
   app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '7d', index: false }));
 
-  const running = (_req, res) => res.json({ status: 'ok', message: 'Chromeline API is running' });
+  const running = (_req, res) => res.json({ status: 'ok', message: 'PrimeBody API is running' });
   app.get('/', running);
   app.get('/api', running);
   app.get('/api/health', (_req, res) => res.json({ ok: true }));
