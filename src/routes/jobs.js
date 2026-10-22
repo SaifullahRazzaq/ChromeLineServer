@@ -69,6 +69,7 @@ r.get('/', h(async (req, res) => {
 r.post('/', requireRole('supervisor', 'admin'), h(async (req, res) => {
   const b = req.body;
   if (!b.vehicle?.make || !b.customer?.name) throw bad('Customer name and vehicle make are required');
+  if (!b.vehicle?.plate?.trim()) throw bad('Number plate is required (customers use it to track their repair)');
   const count = await Job.countDocuments();
   const types = (b.repairTypes || []).filter((t) => REPAIR_TYPES.includes(t));
   const job = await Job.create({

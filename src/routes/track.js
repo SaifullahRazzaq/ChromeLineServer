@@ -14,6 +14,15 @@ const limited = (ip) => {
 };
 
 const norm = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+const digits = (s) => String(s || '').replace(/\D/g, '');
+const esc = (c) => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Matches "ro 1001", "RO-1001" and "1001" against the stored "RO-1001"
+const orderRegex = (input) => {
+  const raw = norm(input);
+  const withPrefix = /^\d+$/.test(raw) ? `RO${raw}` : raw;
+  return new RegExp(`^${[...withPrefix].map(esc).join('[\\s-]*')}$`, 'i');
+};
 
 const STAGES = [
   { id: 'received', label: 'Vehicle received', statuses: ['assigned', 'accepted'] },
@@ -34,15 +43,20 @@ const MESSAGE = {
   ready_for_delivery: 'Your vehicle is ready. Come and collect it!',
 };
 
-// Public, exact match on order number AND plate so a status can't be guessed from one value
+// Public lookup. Needs the order number AND a second factor (number plate or the phone number on the order),
+// and answers every miss with the same message so order numbers cannot be probed.
 r.post('/', h(async (req, res) => {
   if (limited(req.ip)) throw new HttpError(429, 'Too many lookups. Please try again later or call us.');
-  const orderNo = norm(req.body.orderNo);
-  const plate = norm(req.body.plate);
-  if (!orderNo || !plate) throw bad('Enter your order number and number plate');
-  const jobs = await Job.find({}).select('orderNo vehicle.plate vehicle.make vehicle.model vehicle.year status progress deadline updatedAt createdAt').lean();
-  const job = jobs.find((j) => norm(j.orderNo) === orderNo && norm(j.vehicle?.plate) === plate);
-  if (!job) throw new HttpError(404, 'We could not find a repair matching those details. Check your order number and plate.');
+  const orderNo = String(req.body.orderNo || '').trim();
+  const second = String(req.body.plate || req.body.phone || '').trim();
+  if (!orderNo || !second) throw bad('Enter your order number and your number plate (or phone number)');
+  const plate = norm(second);
+  const phone = digits(second);
+  const candidates = await Job.find({ orderNo: orderRegex(orderNo) })
+    .select('orderNo vehicle.plate vehicle.make vehicle.model vehicle.year customer.phone status progress deadline updatedAt')
+    .lean();
+  const job = candidates.find((j) => (plate && norm(j.vehicle?.plate) === plate) || (phone.length >= 7 && digits(j.customer?.phone).endsWith(phone.slice(-9)) && digits(j.customer?.phone).length >= 7));
+  if (!job) throw new HttpError(404, 'We could not find a repair matching those details. Check your order number and number plate, or call us.');
   const idx = STAGES.findIndex((s) => s.statuses.includes(job.status));
   res.json({
     orderNo: job.orderNo,

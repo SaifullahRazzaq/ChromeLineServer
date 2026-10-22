@@ -222,3 +222,20 @@ test('inventory: add part, receive/issue stock with log, low-stock flag, access 
   assert.equal(sum.status, 200);
   assert.ok(sum.data.items >= 6);
 });
+
+test('tracking accepts order-number variants, plate or phone, and never leaks which half was wrong', async () => {
+  for (const orderNo of ['RO-1001', 'ro1001', 'RO 1001', '1001']) {
+    assert.equal((await api('POST', '/track', { body: { orderNo, plate: 'LEB 2301' } })).status, 200, orderNo);
+  }
+  assert.equal((await api('POST', '/track', { body: { orderNo: 'RO-1001', plate: '0300-1112233' } })).status, 200, 'phone as second factor');
+  const wrongPlate = await api('POST', '/track', { body: { orderNo: 'RO-1001', plate: 'NOPE-1' } });
+  const wrongOrder = await api('POST', '/track', { body: { orderNo: 'RO-9999', plate: 'LEB-2301' } });
+  assert.equal(wrongPlate.status, 404);
+  assert.equal(wrongPlate.data.error, wrongOrder.data.error);
+  // new jobs need a plate, otherwise the customer could never track them
+  const noPlate = await api('POST', '/jobs', { token: tok.sup, body: { customer: { name: 'A' }, vehicle: { make: 'Kia' } } });
+  assert.equal(noPlate.status, 400);
+  const ok = await api('POST', '/jobs', { token: tok.sup, body: { customer: { name: 'A', phone: '0300 7654321' }, vehicle: { make: 'Kia', plate: 'ZZ-100' } } });
+  assert.equal(ok.status, 201);
+  assert.equal((await api('POST', '/track', { body: { orderNo: ok.data.orderNo, plate: 'zz100' } })).data.status, 'assigned');
+});
